@@ -28,13 +28,47 @@ export interface AnalysisResult {
     eye_score: number;
     nose_score: number;
     
+    // Deep Analysis Metrics (New)
+    canthal_tilt: number; // Degrees
+    midface_ratio: number; // Compactness
+    jaw_angle: number; // Degrees
+    eye_aspect_ratio: number; // Openness
+    
     warnings: string[];
     landmarks?: { x: number; y: number }[];
 }
 
 let detector: faceLandmarksDetection.FaceLandmarksDetector | null = null;
 
-// Helper function for symmetry calculation
+// Helper function for angle calculation (degrees)
+function calculateAngle(
+    p1: { x: number; y: number },
+    p2: { x: number; y: number },
+    p3: { x: number; y: number }
+): number {
+    const v1 = { x: p1.x - p2.x, y: p1.y - p2.y };
+    const v2 = { x: p3.x - p2.x, y: p3.y - p2.y };
+    
+    const dot = v1.x * v2.x + v1.y * v2.y;
+    const mag1 = Math.sqrt(v1.x * v1.x + v1.y * v1.y);
+    const mag2 = Math.sqrt(v2.x * v2.x + v2.y * v2.y);
+    
+    const angleRad = Math.acos(dot / (mag1 * mag2));
+    return (angleRad * 180) / Math.PI;
+}
+
+// Helper function for Canthal Tilt (degrees relative to horizon)
+function calculateCanthalTilt(
+    inner: { x: number; y: number },
+    outer: { x: number; y: number }
+): number {
+    // Inverted Y axis: Higher Y value means lower on screen.
+    // We want positive if outer is vertically "higher" (smaller Y) than inner.
+    const dy = inner.y - outer.y; 
+    const dx = outer.x - inner.x;
+    const angleRad = Math.atan2(dy, dx);
+    return (angleRad * 180) / Math.PI;
+}
 function calculateSymmetry(
     centerPoint: { x: number; y: number },
     leftPoint: { x: number; y: number },
@@ -210,7 +244,7 @@ async function getDetector() {
         runtime: 'mediapipe',
         solutionPath: 'https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh',
         refineLandmarks: true,
-        maxNumFaces: 1,
+        maxFaces: 1,
         // @ts-ignore
         minDetectionConfidence: 0.75, // Increased from 0.7
         minTrackingConfidence: 0.75
@@ -552,53 +586,107 @@ export async function analyzeFace(imageSource: string | HTMLImageElement): Promi
     const proportions = Math.round((facial_thirds + facial_fifths) / 2);
 
     // Feature Harmony (User Weight: 15%)
-    const eyeSpacingRatio = fifth3 / ((fifth2 + fifth4) / 2); // Space / AvgEyeWidth. Ideal ~1.0
-    const spacingScore = norm(eyeSpacingRatio, 0.8, 1.2);
-    const leftTiltGood = eye_left_outer.y < eye_left_inner.y; 
-    const rightTiltGood = eye_right_outer.y < eye_right_inner.y;
-    const eye_score = Math.round(0.6 * spacingScore + 0.4 * (leftTiltGood && rightTiltGood ? 100 : 70));
     
-    const noseWidthRatio = nose_width / mouth_width; 
-    const nose_score = Math.round(norm(noseWidthRatio, 0.5, 0.8)); // 0.618 is ideal inverse?
+    // --- Deep Analysis Calculations ---
     
-    const harmony = Math.round((eye_score + nose_score + cheekbones + jawline) / 4);
+    // 1. Canthal Tilt
+    // Right Eye: Inner 133, Outer 33
+    // Left Eye: Inner 362, Outer 263
+    const tiltRight = calculateCanthalTilt(eye_right_inner, eye_right_outer);
+    const tiltLeft = calculateCanthalTilt(eye_left_inner, eye_left_outer);
+    const canthal_tilt = (tiltRight + tiltLeft) / 2;
+    
+    // 2. Eye Aspect Ratio (EAR) - Openness
+    // Top 159, Bottom 145 for Right
+    // Top 386, Bottom 374 for Left
+    const eyeHeightR = dist(getKeypoint(159), getKeypoint(145));
+    const eyeWidthR = dist(eye_right_inner, eye_right_outer);
+    const earR = eyeHeightR / eyeWidthR;
+    
+    const eyeHeightL = dist(getKeypoint(386), getKeypoint(374));
+    const eyeWidthL = dist(eye_left_inner, eye_left_outer);
+    const earL = eyeHeightL / eyeWidthL;
+    const eye_aspect_ratio = (earR + earL) / 2;
+    
+    // 3. Midface Ratio (Compactness)
+    // Distance from Pupil/EyeCenter to Mouth Center / Bizygomatic Width (Cheeks)
+    // Using Eye Centers (approx 468/473 for Iris, or center of box)
+    // Let's use Eye Centers calculated from corners
+    const eyeCenterR = { x: (eye_right_inner.x + eye_right_outer.x)/2, y: (eye_right_inner.y + eye_right_outer.y)/2 };
+    const eyeCenterL = { x: (eye_left_inner.x + eye_left_outer.x)/2, y: (eye_left_inner.y + eye_left_outer.y)/2 };
+    const midPointEyes = { x: (eyeCenterR.x + eyeCenterL.x)/2, y: (eyeCenterR.y + eyeCenterL.y)/2 };
+    
+    const midfaceHeight = dist(midPointEyes, mouth_bottom); // Pupil to Upper Lip is standard, but we use Mid-Eyes to Mouth Bottom for robustness
+    // Actually, "Midface Ratio" is often IPD / Midface Height. Or Midface Height / Face Width.
+    // A compact midface is < 1.0 ratio (Height / Width). 
+    // Let's use: Midface Height (Eyes to Mouth) / Cheek Width
+    const midface_ratio = midfaceHeight / cheek_width;
+    
+    // 4. Jaw Angle (Gonial Angle)
+    // Ear (234) -> Jaw Corner (172) -> Chin (152) for Left (Visual Right)
+    // Wait, 234 is right side of face (Visual Left). 
+    // Right Side (Visual Left): Ear(234) -> Jaw(172) -> Chin(152)
+    // Left Side (Visual Right): Ear(454) -> Jaw(397) -> Chin(152)
+    const angleR = calculateAngle(getKeypoint(234), jaw_left, chin_bottom);
+    const angleL = calculateAngle(getKeypoint(454), jaw_right, chin_bottom);
+    const jaw_angle = (angleR + angleL) / 2;
 
-    // Face Shape (User Weight: 10%)
-    const face_shape = determineFaceShape(face_width, face_height, jaw_width, forehead_width);
-    const face_shape_score = getFaceShapeScore(face_shape);
-
-    // Final Weighted Score
-    const weightedScore = (
-        (symmetry * 0.20) +
-        (golden_ratio * 0.25) +
-        (proportions * 0.20) +
-        (harmony * 0.15) +
-        (face_shape_score * 0.10) +
-        (skin_quality * 0.07) +
-        (90 * 0.03) // Base score for "Extra"
+    // Adjust Scores based on Deep Analysis
+    
+    // Eye Score: Tilt + EAR + Symmetry
+    // Positive tilt is good (Hunter eyes), Neutral is okay. Negative is "prey".
+    // Ideal tilt ~ 5-8 degrees for men, slightly more for women.
+    // We target 2-10 degrees as "Excellent".
+    const tiltScore = norm(canthal_tilt, -2, 8); // 8 deg -> 100, -2 -> 0
+    const eye_score = Math.round(
+        0.4 * tiltScore + 
+        0.3 * norm(eye_aspect_ratio, 0.25, 0.45) + 
+        0.3 * eyeSymmetry
+    );
+    
+    // Nose Score: Golden Ratio + Thirds contribution
+    const nose_score = Math.round(
+        0.5 * scoreNoseMouth + 
+        0.5 * facial_thirds
+    );
+    
+    const harmony = Math.round(
+        0.3 * eye_score + 
+        0.3 * nose_score + 
+        0.2 * jawline +
+        0.2 * cheekbones
     );
 
-    const overall = Number((weightedScore / 10).toFixed(1));
+    // Calculate Final Overall Score
+    // Weighted Average
+    const weightedSum = 
+        0.25 * golden_ratio +
+        0.20 * symmetry +
+        0.15 * harmony +
+        0.15 * proportions +
+        0.10 * jawline +
+        0.08 * cheekbones +
+        0.07 * skin_quality;
 
-    // Potential
-    let photo_penalty = 0;
-    const warnings: string[] = [];
-
-    if (q.sharpness <= 150) {
-        photo_penalty += 1.5;
-        warnings.push("low_sharpness");
-    }
-    if (q.brightness < 90 || q.brightness > 160) {
-        photo_penalty += 1.0;
-        warnings.push("bad_brightness");
-    }
+    const overall = Math.round(clamp(weightedSum / 10, 0, 10));
     
-    const potential = Number(clamp(overall + photo_penalty, 0, 10).toFixed(1));
+    // Potential: How much can be improved?
+    // Based on Skin Quality (easiest to fix) and some soft tissue (fat).
+    // Bone structure (Golden Ratio, Symmetry) is hard to fix.
+    const softFactors = (skin_quality + cheekbones) / 2;
+    const hardFactors = (golden_ratio + symmetry + proportions) / 3;
+    const potential = Math.round(clamp(overall + (100 - softFactors) * 0.02, overall, 10));
+
+    // Generate warnings based on quality
+    const warnings: string[] = [];
+    if (q.brightness < 40) warnings.push('Lighting too dark');
+    if (q.brightness > 220) warnings.push('Lighting too bright');
+    if (q.sharpness < 20) warnings.push('Image blurry');
 
     return {
         overall,
         potential,
-        face_shape,
+        face_shape: determineFaceShape(face_width, face_height, jaw_width, forehead_width),
         symmetry,
         golden_ratio,
         proportions,
@@ -610,6 +698,10 @@ export async function analyzeFace(imageSource: string | HTMLImageElement): Promi
         facial_fifths,
         eye_score,
         nose_score,
+        canthal_tilt: Number(canthal_tilt.toFixed(1)),
+        midface_ratio: Number(midface_ratio.toFixed(2)),
+        jaw_angle: Number(jaw_angle.toFixed(1)),
+        eye_aspect_ratio: Number(eye_aspect_ratio.toFixed(2)),
         warnings,
         landmarks: keypoints
     };

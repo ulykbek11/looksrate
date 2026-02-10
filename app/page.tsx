@@ -106,39 +106,45 @@ export default function Home() {
     };
 
     return (
-        <main className="min-h-screen flex flex-col items-center justify-center p-4 md:p-24 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-gray-900 via-[#0a0514] to-black text-white">
+        <main className="min-h-screen flex flex-col items-center justify-center p-4 md:p-24 text-white relative">
+            {/* Ambient Background Glow */}
+            <div className="fixed inset-0 pointer-events-none">
+                <div className="absolute top-[-10%] left-1/2 -translate-x-1/2 w-[800px] h-[600px] bg-cyan-900/20 blur-[120px] rounded-full" />
+                <div className="absolute bottom-0 left-0 w-[500px] h-[500px] bg-blue-900/10 blur-[100px] rounded-full" />
+            </div>
+
             <div className="z-10 w-full max-w-6xl flex flex-col items-center text-center">
-                <h1 className="text-5xl md:text-8xl font-black tracking-tighter mb-4 animate-in fade-in slide-in-from-bottom-4 duration-1000">
-                    AMIR<span className="text-[#00FF88] font-light italic">SUB</span>
+                <h1 className="text-5xl md:text-8xl font-thin tracking-tighter mb-4 animate-in fade-in slide-in-from-bottom-4 duration-1000">
+                    AMIR<span className="text-cyan-400 font-light italic">SUB</span>
                 </h1>
-                <p className="text-gray-400 text-lg md:text-xl max-w-2xl mb-8">
-                    Advanced AI Facial Analysis & Aesthetics Grading
+                <p className="text-gray-400 text-lg md:text-xl max-w-2xl mb-8 font-light tracking-wide uppercase">
+                    Precision AI Aesthetics Engine
                 </p>
 
                 {/* Tabs */}
-                <div className="flex p-1 bg-white/5 rounded-full mb-8 border border-white/10">
+                <div className="flex p-1 bg-white/5 rounded-full mb-8 border border-white/10 backdrop-blur-md">
                     <button
                         onClick={() => setActiveTab('front')}
-                        className={`flex items-center gap-2 px-6 py-2 rounded-full font-bold transition-all ${activeTab === 'front' ? 'bg-[#00FF88] text-black shadow-lg shadow-[#00FF88]/25' : 'text-gray-400 hover:text-white'}`}
+                        className={`flex items-center gap-2 px-8 py-3 rounded-full text-xs font-bold tracking-widest transition-all ${activeTab === 'front' ? 'bg-cyan-400 text-black shadow-[0_0_20px_rgba(34,211,238,0.3)]' : 'text-gray-500 hover:text-white'}`}
                     >
-                        <User className="w-4 h-4" />
-                        FRONT PROFILE
+                        <User className="w-3 h-3" />
+                        FRONT
                     </button>
                     <button
                         onClick={() => setActiveTab('side')}
-                        className={`flex items-center gap-2 px-6 py-2 rounded-full font-bold transition-all ${activeTab === 'side' ? 'bg-[#00FF88] text-black shadow-lg shadow-[#00FF88]/25' : 'text-gray-400 hover:text-white'}`}
+                        className={`flex items-center gap-2 px-8 py-3 rounded-full text-xs font-bold tracking-widest transition-all ${activeTab === 'side' ? 'bg-cyan-400 text-black shadow-[0_0_20px_rgba(34,211,238,0.3)]' : 'text-gray-500 hover:text-white'}`}
                     >
-                        <UserPlus className="w-4 h-4" />
-                        SIDE PROFILE
+                        <UserPlus className="w-3 h-3" />
+                        SIDE
                     </button>
                 </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-start w-full">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 items-start w-full">
                     {/* Left Side: Upload / Preview */}
-                    <div className="flex flex-col items-center space-y-6">
-                        <div className="relative group w-full aspect-square max-w-sm rounded-[2rem] overflow-hidden border-2 border-dashed border-white/20 bg-white/5 hover:border-[#00FF88]/50 transition-all duration-500 flex items-center justify-center">
+                    <div className="flex flex-col items-center space-y-8">
+                        <div className="relative group w-full aspect-square max-w-sm rounded-[2rem] overflow-hidden border border-white/10 bg-white/5 hover:border-cyan-400/30 transition-all duration-500 flex items-center justify-center shadow-2xl">
                             {currentImage ? (
-                                <div className="relative w-full h-full flex items-center justify-center">
+                                <div className="relative w-full h-full flex items-center justify-center bg-black/20">
                                     {/* Wrapper that maintains image aspect ratio exactly */}
                                     <div className="relative inline-block max-w-full max-h-full">
                                         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -151,30 +157,34 @@ export default function Home() {
                                         />
                                         <canvas
                                             ref={canvasRef}
-                                            className="absolute inset-0 w-full h-full pointer-events-none"
+                                            className="absolute inset-0 w-full h-full pointer-events-none opacity-80"
                                         />
                                     </div>
                                 </div>
                             ) : (
-                                <div className="w-full h-full flex flex-col items-center justify-center gap-4">
+                                <div className="w-full h-full flex flex-col items-center justify-center gap-6">
                                     <button
                                         onClick={() => fileInputRef.current?.click()}
                                         className="flex flex-col items-center group/btn"
                                     >
-                                        <Upload className="w-12 h-12 text-gray-500 mb-4 group-hover/btn:text-[#00FF88] transition-colors" />
-                                        <span className="text-gray-500 group-hover/btn:text-gray-300 transition-colors">Upload Photo</span>
+                                        <div className="w-20 h-20 rounded-full bg-white/5 flex items-center justify-center mb-4 group-hover/btn:bg-cyan-400/10 transition-colors border border-white/10 group-hover/btn:border-cyan-400/50">
+                                            <Upload className="w-8 h-8 text-gray-400 group-hover/btn:text-cyan-400 transition-colors" />
+                                        </div>
+                                        <span className="text-xs text-gray-500 font-medium tracking-widest uppercase group-hover/btn:text-gray-300 transition-colors">Upload Photo</span>
                                     </button>
-                                    <div className="w-full px-12 flex items-center gap-4">
-                                        <div className="h-px bg-white/10 flex-1"></div>
-                                        <span className="text-xs text-gray-600 font-bold">OR</span>
-                                        <div className="h-px bg-white/10 flex-1"></div>
+                                    
+                                    <div className="flex items-center gap-3 opacity-30">
+                                        <div className="h-px w-12 bg-white"></div>
+                                        <span className="text-[10px] uppercase tracking-widest">OR</span>
+                                        <div className="h-px w-12 bg-white"></div>
                                     </div>
+
                                     <button
                                         onClick={() => setShowCamera(true)}
-                                        className="flex items-center gap-2 text-gray-400 hover:text-[#00FF88] transition-colors text-sm font-bold uppercase tracking-wider"
+                                        className="flex items-center gap-2 text-gray-500 hover:text-cyan-400 transition-colors text-[10px] font-bold uppercase tracking-widest"
                                     >
                                         <Camera className="w-4 h-4" />
-                                        Open Camera
+                                        Use Camera
                                     </button>
                                 </div>
                             )}
@@ -192,43 +202,35 @@ export default function Home() {
                             <button
                                 onClick={() => {
                                     setImage(null);
-                                    // Reset file input
                                     if (fileInputRef.current) fileInputRef.current.value = '';
                                 }}
                                 disabled={!currentImage}
-                                className="flex-1 flex items-center justify-center gap-2 bg-white/10 hover:bg-white/20 text-white py-4 rounded-2xl font-bold transition-all border border-white/10 disabled:opacity-50 disabled:cursor-not-allowed"
+                                className="flex-1 flex items-center justify-center gap-2 bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white py-4 rounded-xl font-bold transition-all border border-white/10 disabled:opacity-20 disabled:cursor-not-allowed text-xs tracking-widest uppercase"
                             >
-                                <Upload className="w-5 h-5" />
-                                CLEAR
+                                Clear
                             </button>
 
                             <button
                                 onClick={processImage}
                                 disabled={!currentImage || loading}
-                                className={`flex-[2] py-4 rounded-2xl font-black tracking-widest transition-all shadow-lg shadow-[#00FF88]/20 ${!currentImage || loading
-                                    ? 'bg-gray-800 text-gray-500 cursor-not-allowed'
-                                    : 'bg-[#00FF88] text-black hover:scale-[1.02] active:scale-[0.98]'
+                                className={`flex-[2] py-4 rounded-xl font-bold tracking-widest transition-all text-xs uppercase ${!currentImage || loading
+                                    ? 'bg-white/5 text-gray-600 cursor-not-allowed border border-white/5'
+                                    : 'bg-cyan-400 text-black hover:bg-cyan-300 shadow-[0_0_30px_rgba(34,211,238,0.2)]'
                                     }`}
                             >
                                 {loading ? (
                                     <div className="flex items-center justify-center gap-2">
-                                        <Loader2 className="w-5 h-5 animate-spin" />
-                                        ANALYZING...
+                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                        Processing...
                                     </div>
-                                ) : 'ANALYZE FACE'}
+                                ) : 'Analyze Face'}
                             </button>
                         </div>
 
-                        {activeTab === 'side' && (
-                            <div className="text-xs text-gray-500 bg-white/5 px-4 py-2 rounded-lg border border-white/5">
-                                Note: Side profile analysis is experimental. Ensure clear lighting.
-                            </div>
-                        )}
-
                         {error && (
-                            <div className="flex items-center gap-2 text-red-400 bg-red-400/10 px-4 py-2 rounded-lg border border-red-400/20">
-                                <AlertCircle className="w-4 h-4" />
-                                <span className="text-sm font-medium">{error}</span>
+                            <div className="flex items-center gap-3 text-red-400 bg-red-500/10 px-6 py-4 rounded-xl border border-red-500/20 backdrop-blur-md">
+                                <AlertCircle className="w-5 h-5" />
+                                <span className="text-xs font-medium tracking-wide">{error}</span>
                             </div>
                         )}
                     </div>
@@ -236,19 +238,19 @@ export default function Home() {
                     {/* Right Side: Results */}
                     <div className="flex flex-col items-center lg:items-start justify-center min-h-[400px]">
                         {currentResult ? (
-                            <div className="animate-in fade-in zoom-in-95 duration-700 w-full flex justify-center lg:justify-start">
+                            <div className="animate-in fade-in slide-in-from-bottom-8 duration-700 w-full flex justify-center lg:justify-start">
                                 <ResultCard result={currentResult} />
                             </div>
                         ) : (
-                            <div className="text-center lg:text-left space-y-4 opacity-40">
-                                <div className="w-16 h-1 bg-[#00FF88] rounded-full mx-auto lg:mx-0"></div>
-                                <h3 className="text-2xl font-bold">
-                                    {activeTab === 'front' ? 'Ожидание фронтального фото' : 'Ожидание профиля'}
+                            <div className="text-center lg:text-left space-y-6 opacity-30 mt-20 lg:mt-0">
+                                <div className="w-20 h-1 bg-cyan-400/50 rounded-full mx-auto lg:mx-0 blur-sm"></div>
+                                <h3 className="text-4xl font-thin tracking-tighter text-white">
+                                    {activeTab === 'front' ? 'AWAITING INPUT' : 'SIDE PROFILE'}
                                 </h3>
-                                <p className="text-gray-400 max-w-xs">
+                                <p className="text-gray-400 text-sm max-w-xs font-light leading-relaxed">
                                     {activeTab === 'front'
-                                        ? 'Загрузите фото анфас с хорошим освещением для точного анализа.'
-                                        : 'Загрузите фото в профиль для анализа челюсти и осанки.'}
+                                        ? 'Upload a high-quality front facing photo. AI will scan 478+ facial landmarks.'
+                                        : 'Side profile analysis is currently in beta. Ensure distinct jawline visibility.'}
                                 </p>
                             </div>
                         )}
@@ -264,9 +266,9 @@ export default function Home() {
                 />
             )}
 
-            {/* Footer / Credits */}
-            <footer className="mt-24 text-gray-600 text-xs">
-                &copy; 2026 AMIRSUB AI. ALL RIGHTS RESERVED.
+            {/* Footer */}
+            <footer className="mt-32 text-gray-700 text-[10px] uppercase tracking-[0.2em] font-medium">
+                &copy; 2026 AMIRSUB AI LABS
             </footer>
         </main>
     );
