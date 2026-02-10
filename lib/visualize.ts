@@ -94,23 +94,7 @@ export function drawAnalysis(
     drawPath(INDICES.EYE_RIGHT, true, COLORS.eyes, 2);
     drawPath(INDICES.LIPS_OUTER, true, COLORS.lips, 2);
 
-    // 2. Center Line (Symmetry)
-    const top = p(10); // Forehead
-    const bottom = p(152); // Chin
-    
-    ctx.strokeStyle = COLORS.centerLine;
-    ctx.lineWidth = 1;
-    ctx.setLineDash([5, 5]);
-    ctx.beginPath();
-    ctx.moveTo(top.x, top.y);
-    ctx.lineTo(bottom.x, bottom.y);
-    ctx.stroke();
-    ctx.setLineDash([]); // Reset
-
-    // 3. Draw Points
-    // Draw all mesh points faintly? No, too messy.
-    // Just draw the key feature points used in lines
-    
+    // Helper to draw points
     const drawPoint = (idx: number, size: number, color: string) => {
         const pt = p(idx);
         ctx.fillStyle = color;
@@ -119,14 +103,28 @@ export function drawAnalysis(
         ctx.fill();
     };
 
-    // Draw points on the paths
+    // Draw points on the paths (optional, adds detail)
     [...INDICES.JAWLINE].forEach(i => drawPoint(i, 2, COLORS.jaw));
     [...INDICES.EYEBROW_LEFT, ...INDICES.EYEBROW_RIGHT].forEach(i => drawPoint(i, 2, COLORS.eyebrows));
     [...INDICES.EYE_LEFT, ...INDICES.EYE_RIGHT].forEach(i => drawPoint(i, 2, COLORS.eyes));
     [...INDICES.NOSE_BRIDGE, ...INDICES.NOSE_BOTTOM].forEach(i => drawPoint(i, 2, COLORS.nose));
     [...INDICES.LIPS_OUTER].forEach(i => drawPoint(i, 2, COLORS.lips));
 
-    // 4. Highlight Key Points (Golden Ratio / Measurement Anchors)
+    // 2. Center Line (Symmetry)
+    const top = p(10); // Forehead
+    const bottom = p(152); // Chin
+    
+    // Draw center line
+    ctx.beginPath();
+    ctx.moveTo(top.x, top.y);
+    ctx.lineTo(bottom.x, bottom.y);
+    ctx.strokeStyle = COLORS.centerLine;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([5, 5]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // 3. Highlight Key Points (Golden Ratio / Measurement Anchors)
     INDICES.KEY_POINTS.forEach(idx => {
         // Draw a glow
         const pt = p(idx);

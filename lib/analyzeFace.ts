@@ -8,33 +8,6 @@ const norm = (x: number, min: number, max: number) => clamp(((x - min) / (max - 
 const dist = (p1: { x: number; y: number }, p2: { x: number; y: number }) =>
     Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2));
 
-/* 
-FaceMesh Indices Documentation:
-- 10: Forehead top center
-- 152: Chin bottom center
-- 234: Right face edge (anatomical right)
-- 454: Left face edge (anatomical left)
-- 123: Right cheekbone highest point
-- 352: Left cheekbone highest point
-- 172: Right jaw corner
-- 397: Left jaw corner
-- 14: Bottom of the lower lip (useful for chin length)
-
-Additional indices for advanced metrics:
-- 33: Right eye (outer corner)
-- 133: Right eye (inner corner)
-- 362: Left eye (inner corner)
-- 263: Left eye (outer corner)
-- 159: Right eye (center pupil area)
-- 386: Left eye (center pupil area)
-- 61: Upper lip right
-- 291: Upper lip left
-- 0: Nose tip
-- 168: Nose bridge center
-- 9: Nose base (between eyebrows)
-- 197: Eyebrow ridge center
-*/
-
 export interface AnalysisResult {
     overall: number; // Scaled 0-10
     potential: number; // Scaled 0-10
@@ -123,13 +96,7 @@ function cropAndAlignFace(
 ) {
     // 1. Calculate Center and Angle
     const leftEye = landmarks[33];  // Right Eye (Visual Left)
-    const rightEye = landmarks[263]; // Left Eye (Visual Right) - Wait, 33 is RightEye(inner), 263 is LeftEye(outer)? 
-    // Checking indices: 33 is right eye inner/outer? 
-    // Standard MediaPipe: 33 is Right Eye Inner Corner, 133 is Right Eye Outer. 
-    // 362 is Left Eye Inner, 263 is Left Eye Outer.
-    // Let's use Outer Corners for better baseline: 33 (Right Outer?) No, 33 is key point.
-    // Let's stick to the ones used in validation: 33 and 263.
-    // Angle: atan2(dy, dx)
+    const rightEye = landmarks[263]; // Left Eye (Visual Right)
     
     const dx = rightEye.x - leftEye.x;
     const dy = rightEye.y - leftEye.y;
@@ -159,9 +126,10 @@ function cropAndAlignFace(
     
     // 4. Calculate Scale to fit with padding
     // Padding 30% means face should take up ~70% of 512
-    // Or: Box size = max(w, h) * 1.3
     const maxDim = Math.max(faceWidth, faceHeight);
-    const scale = (targetSize * 0.7) / maxDim; // Leave 30% margin total (15% each side)
+    // Ensure we don't divide by zero if detection is weird
+    const safeDim = maxDim > 0 ? maxDim : 100;
+    const scale = (targetSize * 0.7) / safeDim; 
     
     // 5. Transform
     // Order: Translate Center to Origin -> Rotate -> Scale -> Translate to Canvas Center
@@ -230,7 +198,7 @@ function getFaceShapeScore(shape: string): number {
         case "Heart": return 85;
         case "Rectangular": return 75;
         case "Square": return 70;
-        case "Round": return 65; // User didn't specify, assuming lower for "attractiveness" standard typically
+        case "Round": return 65; 
         default: return 75;
     }
 }
@@ -243,16 +211,16 @@ async function getDetector() {
         solutionPath: 'https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh',
         refineLandmarks: true,
         maxNumFaces: 1,
-        // @ts-ignore - Types might be slightly off for older versions but these are standard MP options
-        minDetectionConfidence: 0.7, 
-        minTrackingConfidence: 0.7
+        // @ts-ignore
+        minDetectionConfidence: 0.75, // Increased from 0.7
+        minTrackingConfidence: 0.75
     });
     return detector;
 }
 
 // --- Validation & Retry Logic ---
 
-function validateAnatomy(keypoints: { x: number; y: number }[]): boolean {
+function validateAnatomy(keypoints: { x: number; y: number }[], imageWidth?: number): boolean {
     if (!keypoints || keypoints.length < 468) return false;
 
     const eyeLeft = keypoints[263];
@@ -260,20 +228,119 @@ function validateAnatomy(keypoints: { x: number; y: number }[]): boolean {
     const nose = keypoints[1];
     const mouth = keypoints[13];
     const chin = keypoints[152];
+    const forehead = keypoints[10];
 
+    // 1. Face Size Check (prevent "Tiny Face in Nose" error)
+    // Face height should be at least 20% of image height (if provided)
+    const faceHeight = dist(forehead, chin);
+    
     // Basic Y-axis checks (assuming upright face)
-    // Eyes should be above Nose
-    if (eyeLeft.y >= nose.y || eyeRight.y >= nose.y) return false;
+    // Eyes should be above Nose with significant margin (5% of face height)
+    const yMargin = faceHeight * 0.05;
+    
+    if (eyeLeft.y >= nose.y - yMargin || eyeRight.y >= nose.y - yMargin) {
+        console.warn("Anatomy: Eyes too low relative to nose");
+        return false;
+    }
+    
     // Nose should be above Mouth
-    if (nose.y >= mouth.y) return false;
+    if (nose.y >= mouth.y - yMargin) {
+        console.warn("Anatomy: Nose too low relative to mouth");
+        return false;
+    }
+    
     // Mouth should be above Chin
-    if (mouth.y >= chin.y) return false;
+    if (mouth.y >= chin.y - yMargin) {
+        console.warn("Anatomy: Mouth too low relative to chin");
+        return false;
+    }
 
     // X-axis checks (Anatomical Left is Visual Right)
     // Visual: RightEye(33) < Nose < LeftEye(263)
-    if (eyeRight.x >= nose.x || nose.x >= eyeLeft.x) return false;
+    if (eyeRight.x >= nose.x || nose.x >= eyeLeft.x) {
+        console.warn("Anatomy: Horizontal alignment invalid");
+        return false;
+    }
 
     return true;
+}
+
+// Indices for all eye points to ensure they move together
+const RIGHT_EYE_INDICES = [33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246];
+const LEFT_EYE_INDICES = [263, 249, 390, 373, 374, 380, 381, 382, 362, 398, 384, 385, 386, 387, 388, 466];
+// Iris indices (present if refineLandmarks is true)
+const RIGHT_IRIS_INDICES = [473, 474, 475, 476, 477];
+const LEFT_IRIS_INDICES = [468, 469, 470, 471, 472];
+
+// New: "Impossible Shape" Regularization
+// User Request: "If AI doubts, consider normal proportions"
+function regularizeLandmarks(keypoints: { x: number; y: number }[]): { x: number; y: number }[] {
+    const kp = [...keypoints];
+    
+    const forehead = kp[10];
+    const chin = kp[152];
+    const faceHeight = Math.abs(chin.y - forehead.y);
+    const faceTop = forehead.y;
+    
+    // Strict zones based on Neoclassical Canons
+    // Eyes are typically at the midline (50%) of the head (not face).
+    // For face (hairline to chin), eyes are roughly at 35-45%.
+    // We allow a bit more flexibility but prevent "eyes on nose".
+    
+    const eyeZoneTop = faceTop + faceHeight * 0.20; // Brows are at ~20-25%
+    const eyeZoneBottom = faceTop + faceHeight * 0.50; // Eyes shouldn't go below middle of face mask
+    
+    // Define all points for each eye
+    const allRightEye = [...RIGHT_EYE_INDICES];
+    const allLeftEye = [...LEFT_EYE_INDICES];
+    
+    if (kp.length > 468) {
+        allRightEye.push(...RIGHT_IRIS_INDICES);
+        allLeftEye.push(...LEFT_IRIS_INDICES);
+    }
+    
+    // Helper to shift a group of points if they violate bounds
+    const enforceZone = (indices: number[], zoneTop: number, zoneBottom: number) => {
+        // Find group bounds
+        let minY = Infinity;
+        let maxY = -Infinity;
+        indices.forEach(idx => {
+            if (idx < kp.length) {
+                if (kp[idx].y < minY) minY = kp[idx].y;
+                if (kp[idx].y > maxY) maxY = kp[idx].y;
+            }
+        });
+        
+        let shiftY = 0;
+        if (maxY > zoneBottom) {
+            shiftY = zoneBottom - maxY;
+        } else if (minY < zoneTop) {
+            shiftY = zoneTop - minY;
+        }
+        
+        if (shiftY !== 0) {
+            indices.forEach(idx => {
+                 if (idx < kp.length) {
+                    kp[idx].y += shiftY;
+                 }
+            });
+        }
+    };
+
+    enforceZone(allRightEye, eyeZoneTop, eyeZoneBottom);
+    enforceZone(allLeftEye, eyeZoneTop, eyeZoneBottom);
+    
+    // Constrain Nose Tip (1)
+    const noseZoneBottom = faceTop + faceHeight * 0.75;
+    if (kp[1].y > noseZoneBottom) kp[1].y = noseZoneBottom;
+    // Nose can't be above eyes (use bottom of eye zone + margin)
+    if (kp[1].y < eyeZoneBottom) kp[1].y = eyeZoneBottom + faceHeight * 0.05; 
+
+    // Constrain Mouth (13, 14, 61, 291)
+    const mouthZoneTop = faceTop + faceHeight * 0.65;
+    if (kp[13].y < mouthZoneTop) kp[13].y = mouthZoneTop;
+
+    return kp;
 }
 
 function createRotatedCanvas(img: HTMLImageElement | HTMLCanvasElement, degrees: number): HTMLCanvasElement {
@@ -293,39 +360,35 @@ function createRotatedCanvas(img: HTMLImageElement | HTMLCanvasElement, degrees:
     return canvas;
 }
 
-async function detectWithRetry(img: HTMLImageElement) {
-    const det = await getDetector();
-    
-    // 1. First Pass: Normal
-    let faces = await det.estimateFaces(img);
-    if (faces.length > 0 && validateAnatomy(faces[0].keypoints)) {
-        return faces[0];
-    }
-
-    console.warn("Analysis: Standard detection failed or invalid. Retrying with rotation...");
-
-    // 2. Retry: Rotate -5 degrees
-    let canvas = createRotatedCanvas(img, -5);
-    faces = await det.estimateFaces(canvas);
-    if (faces.length > 0 && validateAnatomy(faces[0].keypoints)) {
-        // We need to map points back? 
-        // Mapping back is complex. For MVP, we can just fail or return the rotated result 
-        // (but visualization will be off unless we draw on rotated canvas).
-        // A better approach for MVP: Tell user to align face.
-        // OR: Just return these keypoints and accept the visualization will be on the "virtual" rotated frame?
-        // No, `analyzeFace` returns metrics. The `landmarks` are used for visualization.
-        // If we return rotated landmarks, we must display the rotated image.
-        // Let's stick to throwing a helpful error for now if rotation was needed, 
-        // OR return a specific warning code so UI can ask user to retry.
-    }
-
-    // For now, if validation fails, we throw to prompt user
-    throw new Error('FACE_ALIGNMENT_ERROR');
+// Helper to load image from src to ensure Natural Resolution
+function loadImage(src: string): Promise<HTMLImageElement> {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = src;
+    });
 }
 
-export async function analyzeFace(img: HTMLImageElement): Promise<AnalysisResult> {
+export async function analyzeFace(imageSource: string | HTMLImageElement): Promise<AnalysisResult> {
     const det = await getDetector();
     
+    // Ensure we are working with Natural Resolution
+    let img: HTMLImageElement;
+    if (typeof imageSource === 'string') {
+        img = await loadImage(imageSource);
+    } else {
+        // If element passed, verify it's loaded. 
+        // Best to clone it to avoid CSS scaling issues if TFJS uses .width/.height
+        // But TFJS uses content. To be safe, we create a fresh image.
+        if (imageSource.src) {
+            img = await loadImage(imageSource.src);
+        } else {
+            img = imageSource; // Fallback
+        }
+    }
+
     // --- Pass 1: Initial Detection ---
     let faces = await det.estimateFaces(img);
     let keypoints: { x: number; y: number; z?: number }[];
@@ -334,13 +397,9 @@ export async function analyzeFace(img: HTMLImageElement): Promise<AnalysisResult
     if (faces.length === 0 || !validateAnatomy(faces[0].keypoints)) {
         console.warn("Analysis: Standard detection failed. Retrying with rotation...");
         try {
-             // Retry: Rotate -5 degrees
+            // Retry: Rotate -5 degrees
             const rotatedCanvas = createRotatedCanvas(img, -5);
             faces = await det.estimateFaces(rotatedCanvas);
-            // Note: If this works, points are on rotated canvas. 
-            // For MVP, we might accept this misalignment or we should map back.
-            // Given we are about to do Pass 2 Alignment, if we find a face here, 
-            // we can use it to drive the Alignment step!
         } catch (e) {
             // Ignore error
         }
@@ -359,12 +418,19 @@ export async function analyzeFace(img: HTMLImageElement): Promise<AnalysisResult
         // Run detection on aligned high-quality 512x512 image
         const refinedFaces = await det.estimateFaces(alignedCanvas);
         
-        if (refinedFaces.length > 0 && validateAnatomy(refinedFaces[0].keypoints)) {
-            // Success! Map points back to original image space
-            keypoints = refinedFaces[0].keypoints.map(p => mapPointBack(p));
-            console.log("Analysis: Refined detection successful");
+        if (refinedFaces.length > 0) {
+            // Map points back
+            const mappedPoints = refinedFaces[0].keypoints.map(p => mapPointBack(p));
+            
+            // Validate refined points
+            if (validateAnatomy(mappedPoints)) {
+                 keypoints = mappedPoints;
+                 console.log("Analysis: Refined detection successful");
+            } else {
+                 console.warn("Analysis: Refined detection anatomically invalid, using initial");
+                 keypoints = initialLandmarks;
+            }
         } else {
-            // Refined detection failed (maybe crop was too tight?), fallback to initial
             console.warn("Analysis: Refined detection failed, using initial results");
             keypoints = initialLandmarks;
         }
@@ -372,6 +438,11 @@ export async function analyzeFace(img: HTMLImageElement): Promise<AnalysisResult
         console.error("Analysis: Alignment error", e);
         keypoints = faces[0].keypoints;
     }
+
+    // --- Final Step: Regularization ---
+    // User Request: "If AI doubts, consider normal proportions"
+    // We run this to fix slight drifts or "impossible shapes"
+    keypoints = regularizeLandmarks(keypoints);
 
     // Validate one last time
     if (!validateAnatomy(keypoints)) {
@@ -410,9 +481,8 @@ export async function analyzeFace(img: HTMLImageElement): Promise<AnalysisResult
     const jaw_width = dist(jaw_left, jaw_right);
     const cheek_width = dist(cheek_left, cheek_right);
     const chin_length = dist(mouth_bottom, chin_bottom);
-    // Forehead width approx (using temples) - 21 is approx right temple, 251 left (checking indices might be needed, using face width for now as proxy or specific indices)
-    // Using face_width as max width (zygomatic). Forehead is usually slightly less.
-    // Let's use 103 (left forehead) and 332 (right forehead)
+    
+    // Forehead width approx
     const forehead_left = getKeypoint(103);
     const forehead_right = getKeypoint(332);
     const forehead_width = dist(forehead_left, forehead_right);
@@ -442,7 +512,6 @@ export async function analyzeFace(img: HTMLImageElement): Promise<AnalysisResult
     const skin_quality = Math.round(0.5 * sharp + 0.3 * contr + 0.2 * clamp(brightScore, 0, 100));
 
     // Symmetry score (User Weight: 20%)
-    // Criteria: Vertical symmetry, Eye alignment, Brow/Nose/Lip symmetry
     const eyeSymmetry = calculateSymmetry(nose_center, eye_left_outer, eye_right_outer);
     const cheekSymmetry = calculateSymmetry(nose_center, cheek_left, cheek_right);
     const jawSymmetry = calculateSymmetry(nose_center, jaw_left, jaw_right);
@@ -450,19 +519,9 @@ export async function analyzeFace(img: HTMLImageElement): Promise<AnalysisResult
     const symmetry = Math.round((eyeSymmetry + cheekSymmetry + jawSymmetry + lipSymmetry) / 4);
 
     // Golden Ratio score (User Weight: 25%)
-    // 1. Face Length / Width ≈ 1.618
     const faceRatio = face_height / face_width;
     const scoreFaceRatio = calculateGoldenRatioScore(faceRatio, PHI);
     
-    // 2. Inter-eye dist / Face Width ≈ 0.46 (User said: Dist between eyes / Width ≈ 0.618??)
-    // Actually, usually it's Inter-pupillary distance / Face Width ≈ 0.46. 
-    // User rule: "Distance between eyes / width face ≈ 0.618". This seems high for inter-eye (inner-to-inner). 
-    // Maybe they mean Outer-to-Outer? Let's assume standard Golden Ratio application.
-    // If we use Inner-to-Inner (fifth3), it's usually 1/5 = 0.2.
-    // If we use Pupillary distance, it's ~0.46.
-    // 0.618 is huge. Maybe they mean "Width / Height = 0.618" (inverse of 1.618).
-    // Let's stick to standard PHI (1.618) applications where appropriate.
-    // Common: Mouth Width / Nose Width ≈ 1.618.
     const nose_width = dist(nose_left, nose_right);
     const mouth_width = dist(mouth_left, mouth_right);
     const scoreNoseMouth = calculateGoldenRatioScore(mouth_width / nose_width, PHI);
@@ -475,7 +534,7 @@ export async function analyzeFace(img: HTMLImageElement): Promise<AnalysisResult
     const maxDev = Math.max(Math.abs(upperThird - avgThird), Math.abs(midThird - avgThird), Math.abs(lowerThird - avgThird));
     const facial_thirds = Math.round(Math.max(0, 100 - (maxDev / avgThird) * 300));
     
-    // 4. Face Fifths (Horizontal) - User rule: Face divides into 5 equal parts
+    // 4. Face Fifths (Horizontal)
     const fifth1 = dist(face_left, eye_right_outer); 
     const fifth2 = dist(eye_right_outer, eye_right_inner);
     const fifth3 = dist(eye_right_inner, eye_left_inner);
@@ -493,22 +552,15 @@ export async function analyzeFace(img: HTMLImageElement): Promise<AnalysisResult
     const proportions = Math.round((facial_thirds + facial_fifths) / 2);
 
     // Feature Harmony (User Weight: 15%)
-    // Eyes: Tilt + Spacing
     const eyeSpacingRatio = fifth3 / ((fifth2 + fifth4) / 2); // Space / AvgEyeWidth. Ideal ~1.0
     const spacingScore = norm(eyeSpacingRatio, 0.8, 1.2);
     const leftTiltGood = eye_left_outer.y < eye_left_inner.y; 
     const rightTiltGood = eye_right_outer.y < eye_right_inner.y;
     const eye_score = Math.round(0.6 * spacingScore + 0.4 * (leftTiltGood && rightTiltGood ? 100 : 70));
     
-    // Nose: Width ratio
     const noseWidthRatio = nose_width / mouth_width; 
     const nose_score = Math.round(norm(noseWidthRatio, 0.5, 0.8)); // 0.618 is ideal inverse?
     
-    // Lips: Upper/Lower ratio (Ideal 1:1.6)
-    // Need lip points. 61-291 is width. 
-    // Upper lip height: 0 (nose tip) to 13 (upper lip top) - simplified
-    // Lower lip height: 14 (lower lip bottom) to 17 (lower lip top)
-    // Using simple metrics for now.
     const harmony = Math.round((eye_score + nose_score + cheekbones + jawline) / 4);
 
     // Face Shape (User Weight: 10%)
@@ -516,15 +568,6 @@ export async function analyzeFace(img: HTMLImageElement): Promise<AnalysisResult
     const face_shape_score = getFaceShapeScore(face_shape);
 
     // Final Weighted Score
-    // Weights:
-    // Symmetry: 20%
-    // Golden Ratio: 25%
-    // Proportions: 20%
-    // Harmony: 15%
-    // Shape: 10%
-    // Skin: 7%
-    // Extra (General): 3% -> we'll distribute this or add a base
-    
     const weightedScore = (
         (symmetry * 0.20) +
         (golden_ratio * 0.25) +
@@ -535,7 +578,6 @@ export async function analyzeFace(img: HTMLImageElement): Promise<AnalysisResult
         (90 * 0.03) // Base score for "Extra"
     );
 
-    // Scale to 0-10
     const overall = Number((weightedScore / 10).toFixed(1));
 
     // Potential
@@ -543,7 +585,7 @@ export async function analyzeFace(img: HTMLImageElement): Promise<AnalysisResult
     const warnings: string[] = [];
 
     if (q.sharpness <= 150) {
-        photo_penalty += 1.5; // Scale 10 -> 1.5
+        photo_penalty += 1.5;
         warnings.push("low_sharpness");
     }
     if (q.brightness < 90 || q.brightness > 160) {
