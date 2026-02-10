@@ -8,15 +8,34 @@ interface MetricRowProps {
     highlight?: boolean;
 }
 
-const MetricRow = ({ label, value, subtext, highlight = false }: MetricRowProps) => (
-    <div className="flex justify-between items-end border-b border-white/5 pb-2 mb-3 last:border-0">
-        <div className="flex flex-col">
-            <span className="text-[10px] uppercase tracking-[0.2em] text-gray-500 font-medium">{label}</span>
-            {subtext && <span className="text-[9px] text-gray-600 mt-0.5">{subtext}</span>}
+const ProgressBar = ({ value, color = "bg-white" }: { value: number; color?: string }) => (
+    <div className="h-1.5 w-full bg-white/10 rounded-full overflow-hidden mt-1.5">
+        <div 
+            className={`h-full ${color} transition-all duration-1000 ease-out`} 
+            style={{ width: `${value}%` }}
+        />
+    </div>
+);
+
+const MetricRow = ({ label, value, subtext, highlight = false, score }: MetricRowProps & { score?: number }) => (
+    <div className="flex flex-col mb-4 last:mb-0">
+        <div className="flex justify-between items-end pb-1">
+            <div className="flex flex-col">
+                <span className="text-[10px] uppercase tracking-[0.2em] text-gray-400 font-medium">{label}</span>
+                {subtext && <span className="text-[9px] text-gray-600 mt-0.5">{subtext}</span>}
+            </div>
+            <div className={`text-lg font-light tracking-wide ${highlight ? 'text-cyan-400' : 'text-white'}`}>
+                {value}
+            </div>
         </div>
-        <div className={`text-lg font-light tracking-wide ${highlight ? 'text-cyan-400' : 'text-white'}`}>
-            {value}
-        </div>
+        {/* If score is provided, show progress bar. If value is percentage string, parse it. */}
+        {score !== undefined ? (
+            <ProgressBar value={score} color={highlight ? "bg-cyan-400" : "bg-white/80"} />
+        ) : (
+             typeof value === 'string' && value.includes('%') ? (
+                <ProgressBar value={parseInt(value)} color={highlight ? "bg-cyan-400" : "bg-white/80"} />
+             ) : null
+        )}
     </div>
 );
 
@@ -59,11 +78,13 @@ export const ResultCard = ({ result }: { result: AnalysisResult }) => {
             </div>
 
             {/* Standard Metrics */}
-            <div className="space-y-1">
-                <MetricRow label="Симметрия" value={`${result.symmetry}%`} />
-                <MetricRow label="Золотое сечение" value={`${result.golden_ratio}%`} highlight />
-                <MetricRow label="Гармония" value={`${result.harmony}%`} />
-                <MetricRow label="Качество кожи" value={`${result.skin_quality}%`} />
+            <div className="space-y-2">
+                <MetricRow label="Маскулинность" value={`${result.masculinity}%`} highlight score={result.masculinity} />
+                <MetricRow label="Симметрия" value={`${result.symmetry}%`} score={result.symmetry} />
+                <MetricRow label="Золотое сечение" value={`${result.golden_ratio}%`} score={result.golden_ratio} />
+                <MetricRow label="Гармония" value={`${result.harmony}%`} score={result.harmony} />
+                <MetricRow label="Качество кожи" value={`${result.skin_quality}%`} score={result.skin_quality} />
+                <MetricRow label="Линия челюсти" value={`${result.jawline}%`} score={result.jawline} />
             </div>
 
             {/* Warnings (Minimalist) */}

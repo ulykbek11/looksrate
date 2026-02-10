@@ -27,6 +27,7 @@ export interface AnalysisResult {
     facial_fifths: number;
     eye_score: number;
     nose_score: number;
+    masculinity: number;
     
     // Deep Analysis Metrics (New)
     canthal_tilt: number; // Degrees
@@ -309,20 +310,22 @@ const LEFT_IRIS_INDICES = [468, 469, 470, 471, 472];
 // New: "Impossible Shape" Regularization
 // User Request: "If AI doubts, consider normal proportions"
 function regularizeLandmarks(keypoints: { x: number; y: number }[]): { x: number; y: number }[] {
-    const kp = [...keypoints];
+    // Deep copy to avoid mutating original references if needed elsewhere
+    const kp = keypoints.map(p => ({ ...p }));
     
     const forehead = kp[10];
     const chin = kp[152];
+    const leftCheek = kp[234];  // Visual Left
+    const rightCheek = kp[454]; // Visual Right
+    
     const faceHeight = Math.abs(chin.y - forehead.y);
+    const faceWidth = Math.abs(rightCheek.x - leftCheek.x);
     const faceTop = forehead.y;
     
-    // Strict zones based on Neoclassical Canons
-    // Eyes are typically at the midline (50%) of the head (not face).
-    // For face (hairline to chin), eyes are roughly at 35-45%.
-    // We allow a bit more flexibility but prevent "eyes on nose".
-    
-    const eyeZoneTop = faceTop + faceHeight * 0.20; // Brows are at ~20-25%
-    const eyeZoneBottom = faceTop + faceHeight * 0.50; // Eyes shouldn't go below middle of face mask
+    // --- 1. Vertical Zones (Neoclassical Canons) ---
+    // Eyes are typically at 35-50% of face height (hairline to chin)
+    const eyeZoneTop = faceTop + faceHeight * 0.20; 
+    const eyeZoneBottom = faceTop + faceHeight * 0.55; // Expanded slightly
     
     // Define all points for each eye
     const allRightEye = [...RIGHT_EYE_INDICES];
@@ -335,7 +338,6 @@ function regularizeLandmarks(keypoints: { x: number; y: number }[]): { x: number
     
     // Helper to shift a group of points if they violate bounds
     const enforceZone = (indices: number[], zoneTop: number, zoneBottom: number) => {
-        // Find group bounds
         let minY = Infinity;
         let maxY = -Infinity;
         indices.forEach(idx => {
@@ -354,9 +356,7 @@ function regularizeLandmarks(keypoints: { x: number; y: number }[]): { x: number
         
         if (shiftY !== 0) {
             indices.forEach(idx => {
-                 if (idx < kp.length) {
-                    kp[idx].y += shiftY;
-                 }
+                 if (idx < kp.length) kp[idx].y += shiftY;
             });
         }
     };
@@ -364,15 +364,54 @@ function regularizeLandmarks(keypoints: { x: number; y: number }[]): { x: number
     enforceZone(allRightEye, eyeZoneTop, eyeZoneBottom);
     enforceZone(allLeftEye, eyeZoneTop, eyeZoneBottom);
     
-    // Constrain Nose Tip (1)
+    // --- 2. Horizontal Separation (Cyclops Prevention) ---
+    // Inner eye corners must be separated by at least ~10-12% of face width
+    const rightInner = kp[133]; // Visual Left inner
+    const leftInner = kp[362];  // Visual Right inner
+    
+    const minEyeSep = faceWidth * 0.12; 
+    const currentSep = leftInner.x - rightInner.x;
+    
+    if (currentSep < minEyeSep) {
+        const deficit = (minEyeSep - currentSep) / 2;
+        // Move right eye (visual left) to the left
+        allRightEye.forEach(idx => kp[idx].x -= deficit);
+        // Move left eye (visual right) to the right
+        allLeftEye.forEach(idx => kp[idx].x += deficit);
+    }
+
+    // --- 3. Vertical Leveling (Symmetry) ---
+    // If the eyes are significantly misaligned vertically (>3% height), level them.
+    // This assumes the face is roughly upright (which we ensure via rotation).
+    const getMeanY = (indices: number[]) => indices.reduce((sum, idx) => sum + kp[idx].y, 0) / indices.length;
+    const rightEyeY = getMeanY(allRightEye);
+    const leftEyeY = getMeanY(allLeftEye);
+    
+    if (Math.abs(rightEyeY - leftEyeY) < faceHeight * 0.03) {
+        const avgY = (rightEyeY + leftEyeY) / 2;
+        const rightShift = avgY - rightEyeY;
+        const leftShift = avgY - leftEyeY;
+        
+        allRightEye.forEach(idx => kp[idx].y += rightShift);
+        allLeftEye.forEach(idx => kp[idx].y += leftShift);
+    }
+
+    // --- 4. Nose & Mouth Constraints ---
     const noseZoneBottom = faceTop + faceHeight * 0.75;
     if (kp[1].y > noseZoneBottom) kp[1].y = noseZoneBottom;
-    // Nose can't be above eyes (use bottom of eye zone + margin)
+    // Nose tip must be below eyes
     if (kp[1].y < eyeZoneBottom) kp[1].y = eyeZoneBottom + faceHeight * 0.05; 
 
-    // Constrain Mouth (13, 14, 61, 291)
     const mouthZoneTop = faceTop + faceHeight * 0.65;
     if (kp[13].y < mouthZoneTop) kp[13].y = mouthZoneTop;
+    
+    // --- 5. Jawline Centering (Subtle) ---
+    // Ensure chin (152) isn't wildly off-center relative to cheeks
+    const midCheekX = (kp[234].x + kp[454].x) / 2;
+    if (Math.abs(kp[152].x - midCheekX) > faceWidth * 0.1) {
+        // Pull chin 50% towards center
+        kp[152].x = kp[152].x * 0.5 + midCheekX * 0.5;
+    }
 
     return kp;
 }
@@ -657,6 +696,20 @@ export async function analyzeFace(imageSource: string | HTMLImageElement): Promi
         0.2 * cheekbones
     );
 
+    // Masculinity Score
+    // Based on Jawline, Cheekbones, and "Hunter Eyes" (Low Eye Aspect Ratio + Positive Tilt)
+    const hunterEyeScore = Math.round(
+        0.6 * (100 - norm(eye_aspect_ratio, 0.20, 0.40)) + // Lower EAR = More Hunter
+        0.4 * norm(canthal_tilt, 0, 10) // Positive Tilt
+    );
+    
+    const masculinity = Math.round(
+        0.4 * jawline +
+        0.3 * cheekbones +
+        0.2 * hunterEyeScore +
+        0.1 * skin_quality
+    );
+
     // Calculate Final Overall Score
     // Weighted Average
     const weightedSum = 
@@ -698,6 +751,7 @@ export async function analyzeFace(imageSource: string | HTMLImageElement): Promi
         facial_fifths,
         eye_score,
         nose_score,
+        masculinity,
         canthal_tilt: Number(canthal_tilt.toFixed(1)),
         midface_ratio: Number(midface_ratio.toFixed(2)),
         jaw_angle: Number(jaw_angle.toFixed(1)),
